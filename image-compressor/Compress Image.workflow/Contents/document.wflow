@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
 	<key>AMApplicationBuild</key>
-	<string>523</string>
+	<string>528</string>
 	<key>AMApplicationVersion</key>
 	<string>2.10</string>
 	<key>AMDocumentVersion</key>
@@ -21,7 +21,7 @@
 					<true/>
 					<key>Types</key>
 					<array>
-						<string>com.apple.cocoa.path</string>
+						<string>com.apple.cocoa.string</string>
 					</array>
 				</dict>
 				<key>AMActionVersion</key>
@@ -59,15 +59,16 @@
 				<key>ActionParameters</key>
 				<dict>
 					<key>COMMAND_STRING</key>
-					<string>for f in "$@"; do
-  "$HOME/Library/Services/Compress Image.workflow/Contents/Resources/compress-image.sh" "$f"
+					<string>for f in "$@"
+do
+    "$HOME/Library/Services/Compress Image.workflow/Contents/Resources/compress-image.sh" "$f"
 done</string>
 					<key>CheckedForUserDefaultShell</key>
 					<true/>
 					<key>inputMethod</key>
 					<integer>1</integer>
 					<key>shell</key>
-					<string>/bin/zsh</string>
+					<string>/bin/bash</string>
 					<key>source</key>
 					<string></string>
 				</dict>
@@ -97,6 +98,8 @@ done</string>
 				</array>
 				<key>OutputUUID</key>
 				<string>17D681F0-CDD6-4460-AB46-EF3F598E31DA</string>
+				<key>ShowWhenRun</key>
+				<false/>
 				<key>UUID</key>
 				<string>32A4C0A2-9B81-4D49-A231-B67FC7827DCE</string>
 				<key>UnlocalizedApplications</key>
@@ -121,9 +124,9 @@ done</string>
 					<key>1</key>
 					<dict>
 						<key>default value</key>
-						<string></string>
+						<false/>
 						<key>name</key>
-						<string>source</string>
+						<string>CheckedForUserDefaultShell</string>
 						<key>required</key>
 						<string>0</string>
 						<key>type</key>
@@ -136,7 +139,7 @@ done</string>
 						<key>default value</key>
 						<string></string>
 						<key>name</key>
-						<string>COMMAND_STRING</string>
+						<string>source</string>
 						<key>required</key>
 						<string>0</string>
 						<key>type</key>
@@ -147,9 +150,9 @@ done</string>
 					<key>3</key>
 					<dict>
 						<key>default value</key>
-						<string>/bin/sh</string>
+						<string></string>
 						<key>name</key>
-						<string>shell</string>
+						<string>COMMAND_STRING</string>
 						<key>required</key>
 						<string>0</string>
 						<key>type</key>
@@ -160,9 +163,9 @@ done</string>
 					<key>4</key>
 					<dict>
 						<key>default value</key>
-						<false/>
+						<string>/bin/sh</string>
 						<key>name</key>
-						<string>CheckedForUserDefaultShell</string>
+						<string>shell</string>
 						<key>required</key>
 						<string>0</string>
 						<key>type</key>
@@ -172,24 +175,33 @@ done</string>
 					</dict>
 				</dict>
 				<key>isViewVisible</key>
-				<true/>
+				<integer>1</integer>
 				<key>location</key>
-				<string>309.000000:253.000000</string>
+				<string>309.000000:361.000000</string>
 				<key>nibPath</key>
 				<string>/System/Library/Automator/Run Shell Script.action/Contents/Resources/Base.lproj/main.nib</string>
 			</dict>
 			<key>isViewVisible</key>
-			<true/>
+			<integer>1</integer>
 		</dict>
 	</array>
 	<key>connectors</key>
 	<dict/>
 	<key>workflowMetaData</key>
 	<dict>
+		<key>applicationBundleID</key>
+		<string>com.apple.finder</string>
 		<key>applicationBundleIDsByPath</key>
-		<dict/>
+		<dict>
+			<key>/System/Library/CoreServices/Finder.app</key>
+			<string>com.apple.finder</string>
+		</dict>
+		<key>applicationPath</key>
+		<string>/System/Library/CoreServices/Finder.app</string>
 		<key>applicationPaths</key>
-		<array/>
+		<array>
+			<string>/System/Library/CoreServices/Finder.app</string>
+		</array>
 		<key>inputTypeIdentifier</key>
 		<string>com.apple.Automator.fileSystemObject</string>
 		<key>outputTypeIdentifier</key>
@@ -197,17 +209,21 @@ done</string>
 		<key>presentationMode</key>
 		<integer>15</integer>
 		<key>processesInput</key>
-		<integer>0</integer>
+		<false/>
+		<key>serviceApplicationBundleID</key>
+		<string>com.apple.finder</string>
+		<key>serviceApplicationPath</key>
+		<string>/System/Library/CoreServices/Finder.app</string>
 		<key>serviceInputTypeIdentifier</key>
 		<string>com.apple.Automator.fileSystemObject</string>
 		<key>serviceOutputTypeIdentifier</key>
 		<string>com.apple.Automator.nothing</string>
 		<key>serviceProcessesInput</key>
-		<integer>0</integer>
+		<false/>
 		<key>systemImageName</key>
 		<string>NSActionTemplate</string>
 		<key>useAutomaticInputType</key>
-		<integer>0</integer>
+		<false/>
 		<key>workflowTypeIdentifier</key>
 		<string>com.apple.Automator.servicesMenu</string>
 	</dict>

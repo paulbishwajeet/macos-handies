@@ -14,6 +14,9 @@
 
 set -uo pipefail
 
+# Finder Quick Actions run with a minimal PATH that doesn't include Homebrew.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
 # Quality settings (tune as needed)
 JPEG_MAX_QUALITY=85
 PNG_QUALITY_RANGE="65-90"
