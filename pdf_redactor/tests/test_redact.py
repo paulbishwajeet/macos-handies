@@ -2,7 +2,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-import fitz
+import pymupdf as fitz
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
@@ -88,6 +88,31 @@ def test_original_file_untouched(tmp_path):
     redact_pdf(str(src), str(out), ["Alice"])
 
     assert src.read_bytes() == original_bytes
+
+
+def test_metadata_is_scrubbed(tmp_path):
+    src = tmp_path / "in.pdf"
+    out = tmp_path / "out.pdf"
+    make_pdf(src, ["Hello Alice"])
+
+    doc = fitz.open(str(src))
+    doc.set_metadata({
+        "title": "Report about Alice",
+        "author": "Alice Smith",
+        "subject": "Alice's records",
+        "keywords": "Alice, confidential",
+    })
+    doc.saveIncr()
+    doc.close()
+
+    redact_pdf(str(src), str(out), ["Alice"])
+
+    result_doc = fitz.open(str(out))
+    metadata = result_doc.metadata
+    result_doc.close()
+
+    metadata_values = " ".join(str(v) for v in metadata.values() if v)
+    assert "Alice" not in metadata_values
 
 
 def test_cli_reports_missing_input(tmp_path):

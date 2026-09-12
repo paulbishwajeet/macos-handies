@@ -11,3 +11,7 @@
 # Temp files
 *.tmp
 *_old.*
+
+# Python
+__pycache__/
+.pytest_cache/

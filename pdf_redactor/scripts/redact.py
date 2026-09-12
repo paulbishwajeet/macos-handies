@@ -3,7 +3,7 @@
 
 import sys
 
-import fitz  # PyMuPDF
+import pymupdf as fitz  # PyMuPDF
 
 
 def redact_pdf(input_path: str, output_path: str, words: list[str]) -> None:
@@ -17,7 +17,19 @@ def redact_pdf(input_path: str, output_path: str, words: list[str]) -> None:
                 for rect in matches:
                     page.add_redact_annot(rect, fill=(0, 0, 0))
             page.apply_redactions()
-        doc.save(output_path)
+
+        # Clear document metadata (title/author/subject/keywords, etc.) so
+        # redacted words don't survive verbatim in the metadata dictionary.
+        doc.set_metadata({})
+        # Also strip XMP/XML metadata streams, if present, on PyMuPDF
+        # versions that expose this API.
+        if hasattr(doc, "del_xml_metadata"):
+            doc.del_xml_metadata()
+
+        # garbage=4 + clean=True drops unreferenced/old objects (including
+        # stale content streams left behind by incrementally-updated source
+        # PDFs) so redacted text can't survive in the raw output bytes.
+        doc.save(output_path, garbage=4, clean=True, deflate=True)
     finally:
         doc.close()
 
