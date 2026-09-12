@@ -21,7 +21,7 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 echo "Installing dependency (PyMuPDF)..."
-python3 -m pip install --user pymupdf
+python3 -m pip install --user --break-system-packages pymupdf
 
 mkdir -p "$SERVICES_DIR"
 echo "Installing Quick Action to $DEST..."
