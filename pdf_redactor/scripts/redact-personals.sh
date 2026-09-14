@@ -19,6 +19,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULTS_DOMAIN="com.macoshandies.pdfredactor"
 PYTHON_BIN="${PDF_REDACTOR_PYTHON:-python3}"
 
+REDACT_BIN="$SCRIPT_DIR/redact-bin"
+if [ -x "$REDACT_BIN" ]; then
+  REDACT_CMD=("$REDACT_BIN")
+else
+  REDACT_CMD=("$PYTHON_BIN" "$SCRIPT_DIR/redact.py")
+fi
+
 # Escape a string for safe interpolation inside a double-quoted AppleScript
 # string literal (backslashes first, then double quotes).
 applescript_escape() {
@@ -43,7 +50,9 @@ else
   escaped_default=$(applescript_escape "$last_words")
   dialog_result=$(osascript <<EOF
 try
-  set userInput to text returned of (display dialog "Words to redact (comma-separated):" default answer "$escaped_default" with title "Redact Personals")
+  set userInput to text returned of (display dialog "Words to redact (comma-separated):
+
+aipathstudio · https://aipathstudio.com" default answer "$escaped_default" with title "Redact Personals")
   return userInput
 on error number -128
   return "__CANCELLED__"
@@ -73,9 +82,11 @@ if [ ${#words[@]} -eq 0 ]; then
   exit 0
 fi
 
-if ! "$PYTHON_BIN" -c "import fitz" >/dev/null 2>&1; then
-  alert "PyMuPDF is not installed. Please re-run install.sh for this Quick Action."
-  exit 1
+if [ ! -x "$REDACT_BIN" ]; then
+  if ! "$PYTHON_BIN" -c "import fitz" >/dev/null 2>&1; then
+    alert "PyMuPDF is not installed. Please re-run install.sh for this Quick Action."
+    exit 1
+  fi
 fi
 
 for input in "$@"; do
@@ -86,7 +97,7 @@ for input in "$@"; do
   name="${base%.*}"
   output="${dir}/${name}_Red.pdf"
 
-  if ! error_output=$("$PYTHON_BIN" "$SCRIPT_DIR/redact.py" "$input" "$output" "${words[@]}" 2>&1); then
+  if ! error_output=$("${REDACT_CMD[@]}" "$input" "$output" "${words[@]}" 2>&1); then
     alert "Failed to redact \"$base\": $error_output"
   fi
 done
