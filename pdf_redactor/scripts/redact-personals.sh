@@ -19,7 +19,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEFAULTS_DOMAIN="com.macoshandies.pdfredactor"
 PYTHON_BIN="${PDF_REDACTOR_PYTHON:-python3}"
 
-REDACT_BIN="$SCRIPT_DIR/redact-bin"
+REDACT_BIN="$SCRIPT_DIR/redact-bin-$(uname -m)"
+if [ ! -x "$REDACT_BIN" ]; then
+  REDACT_BIN="$SCRIPT_DIR/redact-bin"
+fi
 if [ -x "$REDACT_BIN" ]; then
   REDACT_CMD=("$REDACT_BIN")
 else

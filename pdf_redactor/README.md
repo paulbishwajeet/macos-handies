@@ -33,3 +33,11 @@ text baked into a scanned image is not affected.
 ```bash
 ./uninstall.sh
 ```
+
+## Distributing to others
+
+If you want to share this Quick Action with someone who doesn't have
+this repo, Python, or PyMuPDF, you can build a self-contained,
+double-clickable `.pkg` installer instead of having them clone this
+repo and run `install.sh`. See `packaging/README.md` for build and
+distribution instructions.

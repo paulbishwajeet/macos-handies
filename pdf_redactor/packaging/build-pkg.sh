@@ -3,7 +3,8 @@
 # build-pkg.sh
 #
 # Assembles the Redact Personals Quick Action (including the
-# self-contained redact-bin produced by build-binary.sh) into a single,
+# self-contained per-architecture redact-bin-arm64 / redact-bin-x86_64
+# binaries produced by build-binary.sh) into a single,
 # double-clickable, unsigned .pkg installer. The package targets the
 # current-user-home install domain only, so Installer.app runs it with
 # no admin password, writing into ~/Library/Services exactly like
@@ -23,8 +24,8 @@ WORKFLOW_NAME="Redact Personals.workflow"
 PKG_ID="com.aipathstudio.pdfredactor"
 PKG_VERSION="1.0.0"
 
-if [ ! -f "$BUILD_DIR/redact-bin" ]; then
-  echo "error: $BUILD_DIR/redact-bin not found. Run ./build-binary.sh first." >&2
+if [ ! -f "$BUILD_DIR/redact-bin-arm64" ] || [ ! -f "$BUILD_DIR/redact-bin-x86_64" ]; then
+  echo "error: $BUILD_DIR/redact-bin-arm64 and/or $BUILD_DIR/redact-bin-x86_64 not found. Run ./build-binary.sh first." >&2
   exit 1
 fi
 
@@ -36,8 +37,12 @@ cp "$PDF_REDACTOR/$WORKFLOW_NAME/Contents/Info.plist" "$DEST/Contents/Info.plist
 cp "$PDF_REDACTOR/$WORKFLOW_NAME/Contents/document.wflow" "$DEST/Contents/document.wflow"
 cp "$PDF_REDACTOR/scripts/redact-personals.sh" "$DEST/Contents/Resources/redact-personals.sh"
 cp "$PDF_REDACTOR/scripts/redact.py" "$DEST/Contents/Resources/redact.py"
-cp "$BUILD_DIR/redact-bin" "$DEST/Contents/Resources/redact-bin"
-chmod +x "$DEST/Contents/Resources/redact-personals.sh" "$DEST/Contents/Resources/redact-bin"
+cp "$BUILD_DIR/redact-bin-arm64" "$DEST/Contents/Resources/redact-bin-arm64"
+cp "$BUILD_DIR/redact-bin-x86_64" "$DEST/Contents/Resources/redact-bin-x86_64"
+chmod +x "$DEST/Contents/Resources/redact-personals.sh" "$DEST/Contents/Resources/redact-bin-arm64" "$DEST/Contents/Resources/redact-bin-x86_64"
+
+echo "=== Stripping extended attributes to avoid AppleDouble (._*) BOM entries ==="
+xattr -cr "$PAYLOAD_DIR"
 
 echo "=== Building component package ==="
 pkgbuild \
