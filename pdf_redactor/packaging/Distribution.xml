@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<installer-gui-script minSpecVersion="2">
+    <title>Redact Personals</title>
+    <welcome mime-type="text/plain">This installs the "Redact Personals" Finder Quick Action.
+
+After installing, right-click any PDF file in Finder and choose Quick Actions &gt; Redact Personals to use it.
+
+No admin password is required -- this installs only into your own user account.</welcome>
+    <options customize="never" require-scripts="false" rootVolumeOnly="false"/>
+    <domains enable_localSystem="false" enable_currentUserHome="true" enable_anywhere="false"/>
+    <choices-outline>
+        <line choice="default">
+            <line choice="com.aipathstudio.pdfredactor"/>
+        </line>
+    </choices-outline>
+    <choice id="default"/>
+    <choice id="com.aipathstudio.pdfredactor" visible="false">
+        <pkg-ref id="com.aipathstudio.pdfredactor"/>
+    </choice>
+    <pkg-ref id="com.aipathstudio.pdfredactor">RedactPersonalsComponent.pkg</pkg-ref>
+</installer-gui-script>
