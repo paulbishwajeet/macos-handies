@@ -8,3 +8,5 @@ A collection of small macOS utilities (Finder Quick Actions, scripts, etc.).
   JPEG/PNG images in place.
 - [`pdf_redactor`](pdf_redactor/) - Finder Quick Action to redact
   specified words from a PDF's text.
+- [`video-transposer`](video-transposer/) - Finder Quick Action to
+  transpose the audio of a video up or down by semitones.
