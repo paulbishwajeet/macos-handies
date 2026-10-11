@@ -21,6 +21,16 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 JPEG_MAX_QUALITY=85
 PNG_QUALITY_RANGE="65-90"
 
+# Creates an empty temp file "<dir>/.<name>.XXXXXX.<ext>" and prints its path.
+# macOS mktemp only randomizes trailing X's, so randomize first and then
+# append the extension.
+make_tmp() {
+  local t
+  t=$(mktemp "$1/.$2.XXXXXX") || return 1
+  mv "$t" "$t.$3" || { rm -f "$t"; return 1; }
+  printf '%s' "$t.$3"
+}
+
 for input in "$@"; do
   [ -f "$input" ] || continue
 
@@ -35,7 +45,7 @@ for input in "$@"; do
       if ! command -v jpegoptim >/dev/null 2>&1; then
         continue
       fi
-      tmp=$(mktemp "${dir}/.${name}.XXXXXX.${ext}")
+      tmp=$(make_tmp "$dir" "$name" "$ext") || continue
       cp -p "$input" "$tmp"
       jpegoptim --max="$JPEG_MAX_QUALITY" --strip-all --quiet "$tmp" || { rm -f "$tmp"; continue; }
       ;;
@@ -43,7 +53,7 @@ for input in "$@"; do
       if ! command -v pngquant >/dev/null 2>&1; then
         continue
       fi
-      tmp=$(mktemp "${dir}/.${name}.XXXXXX.${ext}")
+      tmp=$(make_tmp "$dir" "$name" "$ext") || continue
       pngquant --quality="$PNG_QUALITY_RANGE" --strip --speed 1 --force --output "$tmp" "$input" || { rm -f "$tmp"; continue; }
       ;;
     *)
