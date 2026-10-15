@@ -62,7 +62,7 @@ final class VideoModel {
         keyframes = nil
         loadError = nil
         keyframeError = nil
-        job = .idle
+        if !job.isRunning { job = .idle }
         currentTime = 0
         player.replaceCurrentItem(with: AVPlayerItem(url: url))
 
@@ -113,13 +113,14 @@ final class VideoModel {
         NSWorkspace.shared.activateFileViewerSelecting([file])
     }
 
+    /// Only one job runs at a time. Opening another video doesn't cancel or
+    /// hide it; its result names the output file, so it always lands.
     private func run(_ label: String, _ work: @escaping @Sendable () throws -> URL) {
-        guard let url else { return }
+        guard !job.isRunning else { return }
         job = .running(label)
         Task.detached {
             let result = Result { try work() }
             await MainActor.run {
-                guard self.url == url else { return }
                 switch result {
                 case .success(let output): self.job = .succeeded(output)
                 case .failure(let error): self.job = .failed((error as? EngineError)?.message ?? "\(error)")
