@@ -116,14 +116,16 @@ struct Keyframe: Equatable {
 }
 
 /// Parses `ffprobe ... -show_entries packet=pts_time,flags -of csv=p=0`
-/// output (`0.000000,K__` per line) into sorted keyframes.
-func parseKeyframes(csv: String) -> [Keyframe] {
+/// output (`0.000000,K__` per line) into sorted keyframes. `startTime` is the
+/// file's start timestamp (non-zero in .ts/.mts files): times are made
+/// relative to it, matching the player and typed marks; `text` stays raw.
+func parseKeyframes(csv: String, startTime: Double = 0) -> [Keyframe] {
     csv.split(whereSeparator: \.isNewline).compactMap { line -> Keyframe? in
         let fields = line.split(separator: ",", omittingEmptySubsequences: false)
         guard fields.count >= 2, fields[1].contains("K") else { return nil }
         let text = String(fields[0]).trimmingCharacters(in: .whitespaces)
-        guard let time = Double(text) else { return nil }
-        return Keyframe(time: time, text: text)
+        guard let pts = Double(text) else { return nil }
+        return Keyframe(time: pts - startTime, text: text)
     }.sorted { $0.time < $1.time }
 }
 
@@ -280,12 +282,18 @@ func probeMedia(_ url: URL, tools: Tools) throws -> MediaInfo {
 }
 
 /// Keyframe times of the first video stream, read from packets (no decoding).
+/// Times are relative to the file's start; `text` is the raw timestamp.
 func readKeyframes(_ url: URL, tools: Tools) throws -> [Keyframe] {
+    let start = try runTool(tools.ffprobe, [
+        "-v", "error", "-show_entries", "format=start_time", "-of", "csv=p=0", url.path,
+    ])
+    let startTime = Double(String(decoding: start, as: UTF8.self)
+        .trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
     let data = try runTool(tools.ffprobe, [
         "-v", "error", "-select_streams", "v:0",
         "-show_entries", "packet=pts_time,flags", "-of", "csv=p=0", url.path,
     ])
-    return parseKeyframes(csv: String(decoding: data, as: UTF8.self))
+    return parseKeyframes(csv: String(decoding: data, as: UTF8.self), startTime: startTime)
 }
 
 private let quiet = ["-nostdin", "-hide_banner", "-loglevel", "error", "-y"]
@@ -302,7 +310,9 @@ func performCut(input: URL, plan: CutPlan, duration: Double, tools: Tools) throw
             + streams + extra + [url.path])
     }
     func part2(from k: Keyframe, to url: URL, extra: [String]) throws {
-        try runTool(tools.ffmpeg, quiet + ["-ss", k.text, "-i", input.path] + streams + extra + [url.path])
+        // -seek_timestamp 1: k.text is a raw timestamp, not an offset from the start.
+        try runTool(tools.ffmpeg, quiet + ["-seek_timestamp", "1", "-ss", k.text, "-i", input.path]
+            + streams + extra + [url.path])
     }
 
     do {

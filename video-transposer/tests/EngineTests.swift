@@ -128,6 +128,12 @@ struct EngineTests {
     static func testKeyframes() {
         let csv = "0.000000,K__\n0.040000,___\n2.000000,K__\nN/A,K__\n4.000000,K_D\n"
         checkEqual(parseKeyframes(csv: csv).map(\.text), ["0.000000", "2.000000", "4.000000"], "parse keyframes")
+        // .ts/.mts files start at a non-zero timestamp: times become relative
+        // to the file's start, while ffmpeg still gets the raw text.
+        let ts = parseKeyframes(csv: "11.400000,K__,\n13.400000,K__,\n", startTime: 11.4)
+        checkEqual(ts.map(\.text), ["11.400000", "13.400000"], "offset keyframes keep raw text")
+        check(ts.count == 2 && abs(ts[0].time) < 1e-9 && abs(ts[1].time - 2) < 1e-9,
+              "offset keyframes relative to start, got \(ts.map(\.time))")
         checkEqual(firstKeyframe(atOrAfter: 5, in: kf)?.time, 6, "next keyframe")
         checkEqual(firstKeyframe(atOrAfter: 6, in: kf)?.time, 6, "end exactly on a keyframe")
         checkEqual(firstKeyframe(atOrAfter: 8.5, in: kf), nil, "end after the last keyframe")
@@ -175,6 +181,7 @@ struct EngineTests {
             try testProbe(tools, dir)
             try testCuts(tools, dir)
             try testCutFailure(tools, dir)
+            try testOffsetCut(tools, dir)
             try testTranspose(tools, dir)
         } catch {
             check(false, "unexpected error: \(error)")
@@ -254,6 +261,32 @@ struct EngineTests {
         let leftovers = try FileManager.default.contentsOfDirectory(atPath: FileManager.default.temporaryDirectory.path)
             .filter { $0.hasPrefix("videotools-") && !$0.hasPrefix("videotools-tests-") }
         checkEqual(leftovers, [], "concat temp folders removed")
+    }
+
+    /// A transport stream starting at 11.4s, like camcorder .MTS files: marks are
+    /// on a timeline from 0, and the cut must resume at the keyframe the status
+    /// line names.
+    static func testOffsetCut(_ tools: Tools, _ dir: URL) throws {
+        let mp4 = dir.appendingPathComponent("offset-source.mp4")
+        try makeClip(tools, mp4)
+        let clip = dir.appendingPathComponent("cam.ts")
+        try runTool(tools.ffmpeg, ["-v", "error", "-y", "-i", mp4.path, "-c", "copy",
+                                   "-output_ts_offset", "10", clip.path])
+        let original = try frameHashes(tools, clip)
+        checkEqual(original.count, 250, "offset clip frame count")
+        let keyframes = try readKeyframes(clip, tools: tools)
+        check(keyframes.count == 5 && keyframes.allSatisfy { abs($0.time - $0.time.rounded()) < 0.05 }
+              && abs(keyframes[3].time - 6) < 0.05,
+              "offset keyframes near 0, 2, 4, 6, 8, got \(keyframes.map(\.time))")
+
+        let plan = planCut(start: 3, end: 5, duration: 10, keyframes: keyframes)!
+        check(abs((plan.resume?.time ?? 0) - 6) < 0.05, "offset cut resumes near 6s, got \(String(describing: plan.resume))")
+        let output = try performCut(input: clip, plan: plan, duration: 10, tools: tools)
+        checkEqual(output.lastPathComponent, "cam-cut0m03s-0m06s.ts", "offset output name")
+        let m = try frameHashes(tools, output)
+        check((175...178).contains(m.count), "offset middle cut keeps 175-178 frames, got \(m.count)")
+        checkEqual(Array(m.prefix(75)), Array(original.prefix(75)), "offset: frames before Start kept")
+        checkEqual(Array(m.suffix(100)), Array(original[150...]), "offset: frames after the join match the original at K")
     }
 
     static func testCutFailure(_ tools: Tools, _ dir: URL) throws {
