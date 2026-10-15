@@ -35,6 +35,7 @@ struct EngineTests {
         testKeyframes()
         testPlanCut()
         testStatusLine()
+        testWithFFmpeg()
         if failures == 0 {
             print("All engine tests passed.")
         } else {
@@ -158,5 +159,147 @@ struct EngineTests {
                    "Start must be before End, and End within the video (00:10.00).", "bad range")
         checkEqual(cutStatusLine(start: 0, end: 9, duration: 10, keyframes: kf),
                    "That would remove the whole video.", "whole video")
+    }
+
+    // MARK: - Real ffmpeg runs
+
+    static func testWithFFmpeg() {
+        guard let tools = Tools.locate() else {
+            check(false, "ffmpeg/ffprobe not found in /opt/homebrew/bin or /usr/local/bin")
+            return
+        }
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("videotools-tests-\(UUID().uuidString)")
+        try! FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        do {
+            try testProbe(tools, dir)
+            try testCuts(tools, dir)
+            try testCutFailure(tools, dir)
+            try testTranspose(tools, dir)
+        } catch {
+            check(false, "unexpected error: \(error)")
+        }
+    }
+
+    /// A 10s 25fps clip with keyframes every 2s and, optionally, a 440 Hz tone.
+    static func makeClip(_ tools: Tools, _ url: URL, seconds: Int = 10, audio: Bool = true) throws {
+        var args = ["-v", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=25"]
+        if audio { args += ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100"] }
+        args += ["-t", "\(seconds)", "-c:v", "libx264", "-g", "50", "-keyint_min", "50",
+                 "-sc_threshold", "0", "-pix_fmt", "yuv420p"]
+        if audio { args += ["-c:a", "aac", "-shortest"] }
+        try runTool(tools.ffmpeg, args + [url.path])
+    }
+
+    /// MD5 of every decoded video frame, in order.
+    static func frameHashes(_ tools: Tools, _ url: URL) throws -> [String] {
+        let data = try runTool(tools.ffmpeg, ["-v", "error", "-i", url.path, "-map", "0:v", "-f", "framemd5", "-"])
+        return String(decoding: data, as: UTF8.self).split(separator: "\n")
+            .filter { !$0.hasPrefix("#") }
+            .compactMap { $0.split(separator: ",").last?.trimmingCharacters(in: .whitespaces) }
+    }
+
+    static func testProbe(_ tools: Tools, _ dir: URL) throws {
+        let clip = dir.appendingPathComponent("probe.mp4")
+        try makeClip(tools, clip)
+        let info = try probeMedia(clip, tools: tools)
+        check(abs(info.duration - 10) < 0.1, "clip duration ~10s, got \(info.duration)")
+        check(info.hasVideo, "clip has video")
+        checkEqual(info.audioSampleRate, 44100, "clip sample rate")
+        checkEqual(try readKeyframes(clip, tools: tools).map(\.time), [0, 2, 4, 6, 8], "clip keyframes")
+
+        let silent = dir.appendingPathComponent("silent.mp4")
+        try makeClip(tools, silent, seconds: 4, audio: false)
+        let silentInfo = try probeMedia(silent, tools: tools)
+        checkEqual(silentInfo.audioSampleRate, nil, "no-audio clip has no sample rate")
+        check(silentInfo.hasVideo, "no-audio clip has video")
+
+        let junk = dir.appendingPathComponent("junk.mp4")
+        try "not a video".write(to: junk, atomically: true, encoding: .utf8)
+        check((try? probeMedia(junk, tools: tools)) == nil, "unreadable file throws")
+    }
+
+    static func testCuts(_ tools: Tools, _ dir: URL) throws {
+        // Spaces, an apostrophe and non-ASCII in the name, like real downloads.
+        let clip = dir.appendingPathComponent("it's a clip – ü.mp4")
+        try makeClip(tools, clip)
+        let original = try frameHashes(tools, clip)
+        checkEqual(original.count, 250, "original frame count")
+        let keyframes = try readKeyframes(clip, tools: tools)
+
+        // Middle: remove 3s-5s, resumes at the 6s keyframe (frame 150).
+        let middlePlan = planCut(start: 3, end: 5, duration: 10, keyframes: keyframes)!
+        let middle = try performCut(input: clip, plan: middlePlan, duration: 10, tools: tools)
+        checkEqual(middle.lastPathComponent, "it's a clip – ü-cut0m03s-0m06s.mp4", "middle output name")
+        let m = try frameHashes(tools, middle)
+        // Part 1 can overrun Start by a few frames (2 measured with x264 B-frames).
+        check((175...178).contains(m.count), "middle cut keeps 175-178 frames, got \(m.count)")
+        checkEqual(Array(m.prefix(75)), Array(original.prefix(75)), "frames before Start kept")
+        checkEqual(Array(m.suffix(100)), Array(original[150...]), "frames after the join match the original at K")
+
+        // Start: remove 0-3s, resumes at the 4s keyframe (frame 100).
+        let startPlan = planCut(start: 0, end: 3, duration: 10, keyframes: keyframes)!
+        let start = try performCut(input: clip, plan: startPlan, duration: 10, tools: tools)
+        checkEqual(start.lastPathComponent, "it's a clip – ü-cut0m00s-0m04s.mp4", "start output name")
+        checkEqual(try frameHashes(tools, start), Array(original[100...]), "start cut keeps frames from K")
+
+        // End: remove 7s-9s, no keyframe after 9s, so everything from 7s goes.
+        let endPlan = planCut(start: 7, end: 9, duration: 10, keyframes: keyframes)!
+        let end = try performCut(input: clip, plan: endPlan, duration: 10, tools: tools)
+        checkEqual(end.lastPathComponent, "it's a clip – ü-cut0m07s-0m10s.mp4", "end output name")
+        let e = try frameHashes(tools, end)
+        check((175...178).contains(e.count), "end cut keeps 175-178 frames, got \(e.count)")
+        checkEqual(Array(e.prefix(175)), Array(original.prefix(175)), "end cut keeps frames before Start")
+
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: FileManager.default.temporaryDirectory.path)
+            .filter { $0.hasPrefix("videotools-") && !$0.hasPrefix("videotools-tests-") }
+        checkEqual(leftovers, [], "concat temp folders removed")
+    }
+
+    static func testCutFailure(_ tools: Tools, _ dir: URL) throws {
+        let junk = dir.appendingPathComponent("broken.mp4")
+        try "not a video".write(to: junk, atomically: true, encoding: .utf8)
+        let plan = CutPlan.middle(start: 1, resume: Keyframe(time: 2, text: "2.000000"))
+        do {
+            _ = try performCut(input: junk, plan: plan, duration: 3, tools: tools)
+            check(false, "cutting a broken file should throw")
+        } catch let error as EngineError {
+            check(!error.message.isEmpty, "failure carries ffmpeg's error output")
+        }
+        let output = cutOutputURL(for: junk, plan: plan, duration: 3)
+        check(!FileManager.default.fileExists(atPath: output.path), "no partial output left behind")
+    }
+
+    /// Dominant frequency of the audio between 1s and 3s, by counting upward zero crossings.
+    static func measureTone(_ tools: Tools, _ url: URL) throws -> Double {
+        let pcm = try runTool(tools.ffmpeg, ["-v", "error", "-i", url.path, "-map", "0:a", "-ac", "1",
+                                             "-ar", "44100", "-f", "s16le", "-"])
+        let samples = pcm.withUnsafeBytes { Array($0.bindMemory(to: Int16.self)) }
+        let window = samples[44100..<(3 * 44100)]
+        var crossings = 0
+        var previous = window.first!
+        for s in window.dropFirst() {
+            if previous < 0 && s >= 0 { crossings += 1 }
+            previous = s
+        }
+        return Double(crossings) / 2.0
+    }
+
+    static func testTranspose(_ tools: Tools, _ dir: URL) throws {
+        let clip = dir.appendingPathComponent("tone.mp4")
+        try makeClip(tools, clip)
+        checkEqual(transposeFilter(sampleRate: 44100, semitones: -1),
+                   "asetrate=41624.8572,aresample=44100,atempo=1.0594630944", "filter for -1")
+        for n in [-1, 2] {
+            let out = try performTranspose(input: clip, semitones: n, sampleRate: 44100, tools: tools)
+            let expected = 440 * pow(2, Double(n) / 12)
+            let measured = try measureTone(tools, out)
+            check(abs(measured - expected) / expected < 0.01,
+                  "tone after \(n) semitones: expected \(expected), measured \(measured)")
+            let info = try probeMedia(out, tools: tools)
+            check(abs(info.duration - 10) < 0.1, "transposed duration unchanged, got \(info.duration)")
+            check(info.hasVideo, "transposed output keeps video")
+        }
+        check(abs(try measureTone(tools, clip) - 440) / 440 < 0.01, "original tone is 440 Hz")
     }
 }

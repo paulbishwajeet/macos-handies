@@ -194,3 +194,164 @@ func cutStatusLine(start: Double?, end: Double?, duration: Double?, keyframes: [
 func cutOutputURL(for input: URL, plan: CutPlan, duration: Double) -> URL {
     cutOutputURL(for: input, from: plan.start, to: plan.resume?.time ?? duration)
 }
+
+// MARK: - Running ffmpeg / ffprobe
+
+struct EngineError: Error, Equatable {
+    let message: String
+}
+
+struct Tools {
+    let ffmpeg: URL
+    let ffprobe: URL
+
+    /// Finds ffmpeg and ffprobe in the first directory that has both.
+    static func locate(in dirs: [String] = ["/opt/homebrew/bin", "/usr/local/bin"]) -> Tools? {
+        let fm = FileManager.default
+        for dir in dirs {
+            let ffmpeg = URL(fileURLWithPath: dir).appendingPathComponent("ffmpeg")
+            let ffprobe = URL(fileURLWithPath: dir).appendingPathComponent("ffprobe")
+            if fm.isExecutableFile(atPath: ffmpeg.path), fm.isExecutableFile(atPath: ffprobe.path) {
+                return Tools(ffmpeg: ffmpeg, ffprobe: ffprobe)
+            }
+        }
+        return nil
+    }
+}
+
+/// Runs a tool to completion and returns its stdout. Throws EngineError with
+/// its stderr when it exits non-zero.
+@discardableResult
+func runTool(_ executable: URL, _ arguments: [String]) throws -> Data {
+    let process = Process()
+    process.executableURL = executable
+    process.arguments = arguments
+    process.standardInput = FileHandle.nullDevice
+    let out = Pipe(), err = Pipe()
+    process.standardOutput = out
+    process.standardError = err
+    do {
+        try process.run()
+    } catch {
+        throw EngineError(message: "Could not run \(executable.lastPathComponent): \(error.localizedDescription)")
+    }
+    // Drain stderr on another thread so neither pipe fills up and blocks.
+    var errData = Data()
+    let group = DispatchGroup()
+    group.enter()
+    DispatchQueue.global().async {
+        errData = err.fileHandleForReading.readDataToEndOfFile()
+        group.leave()
+    }
+    let outData = out.fileHandleForReading.readDataToEndOfFile()
+    group.wait()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+        let text = String(decoding: errData, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        throw EngineError(message: text.isEmpty
+            ? "\(executable.lastPathComponent) exited with status \(process.terminationStatus)"
+            : text)
+    }
+    return outData
+}
+
+struct MediaInfo: Equatable {
+    let duration: Double
+    let hasVideo: Bool
+    /// Sample rate of the first audio stream, or nil when there is no audio.
+    let audioSampleRate: Int?
+}
+
+func probeMedia(_ url: URL, tools: Tools) throws -> MediaInfo {
+    let data = try runTool(tools.ffprobe, [
+        "-v", "error", "-show_entries", "stream=codec_type,sample_rate:format=duration",
+        "-of", "json", url.path,
+    ])
+    guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let format = json["format"] as? [String: Any],
+          let durationText = format["duration"] as? String,
+          let duration = Double(durationText)
+    else { throw EngineError(message: "Could not read \(url.lastPathComponent) as a video.") }
+    let streams = json["streams"] as? [[String: Any]] ?? []
+    let hasVideo = streams.contains { $0["codec_type"] as? String == "video" }
+    let audio = streams.first { $0["codec_type"] as? String == "audio" }
+    let sampleRate = (audio?["sample_rate"] as? String).flatMap { Int($0) }
+    return MediaInfo(duration: duration, hasVideo: hasVideo, audioSampleRate: sampleRate)
+}
+
+/// Keyframe times of the first video stream, read from packets (no decoding).
+func readKeyframes(_ url: URL, tools: Tools) throws -> [Keyframe] {
+    let data = try runTool(tools.ffprobe, [
+        "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "packet=pts_time,flags", "-of", "csv=p=0", url.path,
+    ])
+    return parseKeyframes(csv: String(decoding: data, as: UTF8.self))
+}
+
+private let quiet = ["-nostdin", "-hide_banner", "-loglevel", "error", "-y"]
+
+/// Removes the planned section by stream copy and returns the output file.
+/// On failure, deletes any partial output and throws EngineError.
+func performCut(input: URL, plan: CutPlan, duration: Double, tools: Tools) throws -> URL {
+    let output = cutOutputURL(for: input, plan: plan, duration: duration)
+    let faststart = needsFaststart(output) ? ["-movflags", "+faststart"] : []
+    let streams = ["-map", "0:v", "-map", "0:a?", "-c", "copy", "-avoid_negative_ts", "make_zero"]
+
+    func part1(to url: URL, extra: [String]) throws {
+        try runTool(tools.ffmpeg, quiet + ["-i", input.path, "-t", String(format: "%.6f", plan.start)]
+            + streams + extra + [url.path])
+    }
+    func part2(from k: Keyframe, to url: URL, extra: [String]) throws {
+        try runTool(tools.ffmpeg, quiet + ["-ss", k.text, "-i", input.path] + streams + extra + [url.path])
+    }
+
+    do {
+        switch plan {
+        case .fromStart(let k):
+            try part2(from: k, to: output, extra: faststart)
+        case .toEnd:
+            try part1(to: output, extra: faststart)
+        case .middle(_, let k):
+            let temp = FileManager.default.temporaryDirectory
+                .appendingPathComponent("videotools-\(UUID().uuidString)")
+            try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: temp) }
+            let ext = input.pathExtension.isEmpty ? "" : ".\(input.pathExtension)"
+            let seg1 = temp.appendingPathComponent("seg1\(ext)")
+            let seg2 = temp.appendingPathComponent("seg2\(ext)")
+            try part1(to: seg1, extra: [])
+            try part2(from: k, to: seg2, extra: [])
+            let list = temp.appendingPathComponent("list.txt")
+            try "file '\(seg1.path)'\nfile '\(seg2.path)'\n".write(to: list, atomically: true, encoding: .utf8)
+            try runTool(tools.ffmpeg, quiet + ["-f", "concat", "-safe", "0", "-i", list.path, "-c", "copy"]
+                + faststart + [output.path])
+        }
+    } catch {
+        try? FileManager.default.removeItem(at: output)
+        throw error
+    }
+    return output
+}
+
+/// `asetrate=SR·r,aresample=SR,atempo=1/r` with r = 2^(semitones/12).
+func transposeFilter(sampleRate: Int, semitones: Int) -> String {
+    let r = pow(2.0, Double(semitones) / 12)
+    return String(format: "asetrate=%.4f,aresample=%d,atempo=%.10f", Double(sampleRate) * r, sampleRate, 1 / r)
+}
+
+/// Pitch-shifts the audio, copies the video, and returns the output file.
+/// On failure, deletes any partial output and throws EngineError.
+func performTranspose(input: URL, semitones: Int, sampleRate: Int, tools: Tools) throws -> URL {
+    let output = transposeOutputURL(for: input, semitones: semitones)
+    do {
+        try runTool(tools.ffmpeg, quiet + [
+            "-i", input.path, "-map", "0:v?", "-map", "0:a", "-c:v", "copy",
+            "-af", transposeFilter(sampleRate: sampleRate, semitones: semitones),
+            "-c:a", "aac", "-b:a", "256k", output.path,
+        ])
+    } catch {
+        try? FileManager.default.removeItem(at: output)
+        throw error
+    }
+    return output
+}
